@@ -7,13 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 
-	openapi_v2 "github.com/google/gnostic-models/openapiv2"
-	"google.golang.org/protobuf/proto"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 	"sigs.k8s.io/kustomize/kyaml/errors"
 	"sigs.k8s.io/kustomize/kyaml/openapi/kubernetesapi"
@@ -84,7 +81,6 @@ type format string
 
 const (
 	JsonOrYaml format = "jsonOrYaml"
-	Proto      format = "proto"
 )
 
 // precomputedIsNamespaceScoped precomputes IsNamespaceScoped for known types. This avoids Schema creation,
@@ -704,13 +700,12 @@ func parseBuiltinSchema(version string) {
 		// don't parse the built in schema
 		return
 	}
-	// parse the swagger, this should never fail
-	assetName := filepath.Join(
-		"kubernetesapi",
-		strings.ReplaceAll(version, ".", "_"),
-		"swagger.pb")
-
-	if err := parse(kubernetesapi.OpenAPIMustAsset[version](assetName), Proto); err != nil {
+	loadCompact, found := kubernetesapi.OpenAPIMustAsset[version]
+	if !found {
+		return
+	}
+	// rebuild the schema from the compact built-in data, this should never fail
+	if err := parseCompactBuiltinSchema(loadCompact("")); err != nil {
 		// this should never happen
 		panic(err)
 	}
@@ -720,18 +715,6 @@ func parseBuiltinSchema(version string) {
 func parse(b []byte, format format) error {
 	var swagger spec.Swagger
 	switch {
-	case format == Proto:
-		doc := &openapi_v2.Document{}
-		// We parse protobuf and get an openapi_v2.Document here.
-		if err := proto.Unmarshal(b, doc); err != nil {
-			return fmt.Errorf("openapi proto unmarshalling failed: %w", err)
-		}
-		// convert the openapi_v2.Document back to Swagger
-		_, err := swagger.FromGnostic(doc)
-		if err != nil {
-			return errors.Wrap(err)
-		}
-
 	case format == JsonOrYaml:
 		if len(b) > 0 && b[0] != byte('{') {
 			var err error

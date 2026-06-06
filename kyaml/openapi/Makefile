@@ -10,14 +10,12 @@ API_VERSION ?= "v1.21.2"
 
 .PHONY: all
 all: \
-	kustomizationapi/swagger.go \
-	kubernetesapi/swagger.go \
+	kubernetesapi/schema.json.gz \
 	kubernetesapi/openapiinfo.go
 
 .PHONY: clean
 clean:
-	rm kustomizationapi/swagger.go
-	rm kubernetesapi/openapiinfo.go
+	rm -f kubernetesapi/openapiinfo.go
 
 # This will remove all currently built-in schema,
 # so think twice before deleting.
@@ -25,10 +23,7 @@ clean:
 # to contact a live kubernetes API server.
 .PHONY: nuke
 nuke: clean
-	rm -r kubernetesapi/*
-
-$(MYGOBIN)/go-bindata:
-	go install github.com/go-bindata/go-bindata/v3/go-bindata@latest
+	rm -rf kubernetesapi/v1_*
 
 $(MYGOBIN)/kind:
 	( \
@@ -44,19 +39,16 @@ $(MYGOBIN)/kind:
 kubernetesapi/openapiinfo.go:
 	./scripts/makeOpenApiInfoDotGo.sh
 
-kustomizationapi/swagger.go: $(MYGOBIN)/go-bindata kustomizationapi/swagger.json
-	$(MYGOBIN)/go-bindata \
-		--pkg kustomizationapi \
-		-o kustomizationapi/swagger.go \
-		kustomizationapi/swagger.json
-
 .PHONY: kubernetesapi/swagger.pb
 kubernetesapi/swagger.pb: $(MYGOBIN)/kind $(MYGOBIN)/kustomize
 	./scripts/fetchSchemaFromCluster.sh $(API_VERSION)
 
-.PHONY: kubernetesapi/swagger.go
-kubernetesapi/swagger.go: $(MYGOBIN)/go-bindata kubernetesapi/swagger.pb
-	./scripts/generateSwaggerDotGo.sh $(API_VERSION)
+# schema.json.gz is the embedded, committed built-in schema: the compact set of
+# fields kustomize reads, extracted from swagger.pb (see kubernetesapi/scripts/
+# extractschema) and gzip-compressed. It is regenerated from a fetched swagger.pb.
+.PHONY: kubernetesapi/schema.json.gz
+kubernetesapi/schema.json.gz: kubernetesapi/swagger.pb
+	./scripts/extractSchema.sh $(API_VERSION)
 
 $(MYGOBIN)/kustomize:
 	$(shell cd ../.. && MYGOBIN=$(MYGOBIN) make $(MYGOBIN)/kustomize)

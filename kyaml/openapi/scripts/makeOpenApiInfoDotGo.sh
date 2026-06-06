@@ -7,7 +7,7 @@
 # kubernetesapi/openapiinfo.go
 #
 # This script should only be run after the
-# swagger.json and swagger.go files are generated.
+# per-version schema.json.gz files are generated.
 
 set -e
 

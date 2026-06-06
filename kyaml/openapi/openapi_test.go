@@ -61,17 +61,12 @@ func TestSchemaForResourceType(t *testing.T) {
 	if !assert.NotNil(t, f) {
 		t.FailNow()
 	}
-	if !assert.Equal(t, "DeploymentSpec is the specification of the desired behavior of the Deployment.",
-		f.Schema.Description) {
-		t.FailNow()
-	}
 
 	replicas := f.Field("replicas")
 	if !assert.NotNil(t, replicas) {
 		t.FailNow()
 	}
-	if !assert.Equal(t, "Number of desired pods. This is a pointer to distinguish between explicit zero and not specified. Defaults to 1.",
-		replicas.Schema.Description) {
+	if !assert.Equal(t, "integer", replicas.Schema.Type[0]) {
 		t.FailNow()
 	}
 
@@ -79,12 +74,21 @@ func TestSchemaForResourceType(t *testing.T) {
 	if !assert.NotNil(t, temp) {
 		t.FailNow()
 	}
-	if !assert.Equal(t, "PodTemplateSpec describes the data a pod should have when created from a template",
-		temp.Schema.Description) {
+
+	containersField := temp.Field("spec").Field("containers")
+	if !assert.NotNil(t, containersField) {
+		t.FailNow()
+	}
+	// containers is a strategic-merge list keyed by name
+	strategy, key := containersField.PatchStrategyAndKey()
+	if !assert.Equal(t, "merge", strategy) {
+		t.FailNow()
+	}
+	if !assert.Equal(t, "name", key) {
 		t.FailNow()
 	}
 
-	containers := temp.Field("spec").Field("containers").Elements()
+	containers := containersField.Elements()
 	if !assert.NotNil(t, containers) {
 		t.FailNow()
 	}
@@ -93,8 +97,7 @@ func TestSchemaForResourceType(t *testing.T) {
 	if !assert.NotNil(t, targetPort) {
 		t.FailNow()
 	}
-	if !assert.Equal(t, "Number of port to expose on the pod's IP address. This must be a valid port number, 0 < x < 65536.",
-		targetPort.Schema.Description) {
+	if !assert.Equal(t, "integer", targetPort.Schema.Type[0]) {
 		t.FailNow()
 	}
 

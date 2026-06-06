@@ -1,0 +1,4 @@
+# Raw protobuf schemas fetched from a cluster (scripts/fetchSchemaFromCluster.sh)
+# are the regeneration source only; the committed, embedded asset is the compact
+# schema.json.gz produced by scripts/extractschema.
+*/swagger.pb
