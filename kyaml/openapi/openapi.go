@@ -7,16 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 
-	openapi_v2 "github.com/google/gnostic-models/openapiv2"
-	"google.golang.org/protobuf/proto"
 	"k8s.io/kube-openapi/pkg/validation/spec"
 	"sigs.k8s.io/kustomize/kyaml/errors"
-	"sigs.k8s.io/kustomize/kyaml/openapi/kubernetesapi"
 	"sigs.k8s.io/kustomize/kyaml/openapi/kustomizationapi"
 	"sigs.k8s.io/kustomize/kyaml/yaml"
 	k8syaml "sigs.k8s.io/yaml"
@@ -84,7 +80,6 @@ type format string
 
 const (
 	JsonOrYaml format = "jsonOrYaml"
-	Proto      format = "proto"
 )
 
 // precomputedIsNamespaceScoped precomputes IsNamespaceScoped for known types. This avoids Schema creation,
@@ -424,7 +419,7 @@ func isInitSchemaNeededForNamespaceScopeCheck() bool {
 	if customSchema != nil {
 		return true // initSchema is needed.
 	}
-	if kubernetesOpenAPIVersion == "" || kubernetesOpenAPIVersion == kubernetesOpenAPIDefaultVersion {
+	if kubernetesOpenAPIVersion == "" || kubernetesOpenAPIVersion == registeredBuiltinVersion {
 		// The default built-in schema is in use. Since
 		// precomputedIsNamespaceScoped aligns with the default built-in schema
 		// (verified by TestIsNamespaceScopedPrecompute), there is no need to
@@ -575,10 +570,6 @@ func (rs *ResourceSchema) PatchStrategyAndKey() (string, string) {
 }
 
 const (
-	// kubernetesOpenAPIDefaultVersion is the latest version number of the statically compiled in
-	// OpenAPI schema for kubernetes built-in types
-	kubernetesOpenAPIDefaultVersion = kubernetesapi.DefaultOpenAPI
-
 	// kustomizationAPIAssetName is the name of the asset containing the statically compiled in
 	// OpenAPI definitions for Kustomization built-in types
 	kustomizationAPIAssetName = "kustomizationapi/swagger.json"
@@ -637,7 +628,7 @@ func SetSchema(openAPIField map[string]string, schema []byte, reset bool) error 
 	if kubernetesOpenAPIVersion == "" {
 		return nil
 	}
-	if _, ok := kubernetesapi.OpenAPIMustAsset[kubernetesOpenAPIVersion]; !ok {
+	if registeredBuiltinVersion == "" || kubernetesOpenAPIVersion != registeredBuiltinVersion {
 		return fmt.Errorf("the specified OpenAPI version is not built in")
 	}
 
@@ -654,7 +645,7 @@ func GetSchemaVersion() string {
 
 	switch {
 	case kubernetesOpenAPIVersion == "" && customSchema == nil:
-		return kubernetesOpenAPIDefaultVersion
+		return registeredBuiltinVersion
 	case customSchema != nil:
 		return "using custom schema from file provided"
 	default:
@@ -679,16 +670,12 @@ func initSchema() {
 			panic(fmt.Errorf("invalid schema file: %w", err))
 		}
 	} else {
-		if kubernetesOpenAPIVersion == "" || kubernetesOpenAPIVersion == kubernetesOpenAPIDefaultVersion {
-			parseBuiltinSchema(kubernetesOpenAPIDefaultVersion)
-			globalSchema.defaultBuiltInSchemaParseStatus = schemaParsed
-		} else {
-			parseBuiltinSchema(kubernetesOpenAPIVersion)
-		}
+		parseBuiltinSchema()
+		globalSchema.defaultBuiltInSchemaParseStatus = schemaParsed
 	}
 
 	if globalSchema.defaultBuiltInSchemaParseStatus == schemaParseDelayed {
-		parseBuiltinSchema(kubernetesOpenAPIDefaultVersion)
+		parseBuiltinSchema()
 		globalSchema.defaultBuiltInSchemaParseStatus = schemaParsed
 	}
 
@@ -698,21 +685,19 @@ func initSchema() {
 	}
 }
 
-// parseBuiltinSchema calls parse to parse the json or proto schemas
-func parseBuiltinSchema(version string) {
-	if globalSchema.noUseBuiltInSchema {
-		// don't parse the built in schema
+// parseBuiltinSchema indexes the registered built-in schema (if any) into the
+// global schema. It is a no-op if built-in use is suppressed or nothing was
+// registered (i.e. no package providing the schema data was imported).
+func parseBuiltinSchema() {
+	if globalSchema.noUseBuiltInSchema || registeredBuiltinDefs == nil {
 		return
 	}
-	// parse the swagger, this should never fail
-	assetName := filepath.Join(
-		"kubernetesapi",
-		strings.ReplaceAll(version, ".", "_"),
-		"swagger.pb")
-
-	if err := parse(kubernetesapi.OpenAPIMustAsset[version](assetName), Proto); err != nil {
-		// this should never happen
-		panic(err)
+	AddDefinitions(registeredBuiltinDefs)
+	if globalSchema.namespaceabilityByResourceType == nil {
+		globalSchema.namespaceabilityByResourceType = make(map[yaml.TypeMeta]bool)
+	}
+	for typeMeta, namespaced := range registeredBuiltinScopes {
+		globalSchema.namespaceabilityByResourceType[typeMeta] = namespaced
 	}
 }
 
@@ -720,18 +705,6 @@ func parseBuiltinSchema(version string) {
 func parse(b []byte, format format) error {
 	var swagger spec.Swagger
 	switch {
-	case format == Proto:
-		doc := &openapi_v2.Document{}
-		// We parse protobuf and get an openapi_v2.Document here.
-		if err := proto.Unmarshal(b, doc); err != nil {
-			return fmt.Errorf("openapi proto unmarshalling failed: %w", err)
-		}
-		// convert the openapi_v2.Document back to Swagger
-		_, err := swagger.FromGnostic(doc)
-		if err != nil {
-			return errors.Wrap(err)
-		}
-
 	case format == JsonOrYaml:
 		if len(b) > 0 && b[0] != byte('{') {
 			var err error
